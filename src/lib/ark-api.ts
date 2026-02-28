@@ -1,3 +1,4 @@
+import { Agent } from 'undici'
 import { logInfo as _ulogInfo, logError as _ulogError } from '@/lib/logging/core'
 /**
  * 火山引擎 API 统一调用工具
@@ -250,9 +251,16 @@ function validateArkVideoTaskRequest(request: ArkVideoTaskRequest) {
     }
 }
 
+/** 无超时的 undici Agent，用于避免 Node fetch 底层的 HeadersTimeoutError */
+const NO_TIMEOUT_AGENT = new Agent({
+    headersTimeout: 0,
+    bodyTimeout: 0,
+    connectTimeout: 0,
+})
+
 /**
  * 带超时的 fetch 封装
- * @param timeoutMs 超时毫秒数；≤0 表示不设超时（一直等待）
+ * @param timeoutMs 超时毫秒数；≤0 表示不设超时（一直等待），并关闭 undici 的 headers/body 超时以免 HeadersTimeoutError
  */
 async function fetchWithTimeout(
     url: string,
@@ -270,11 +278,13 @@ async function fetchWithTimeout(
         fullUrl = `${baseUrl}${url}`
     }
 
+    const fetchOptions: RequestInit & { dispatcher?: Agent } = {
+        ...options,
+        ...(timeoutMs > 0 ? { signal: controller.signal } : { dispatcher: NO_TIMEOUT_AGENT }),
+    }
+
     try {
-        const response = await fetch(fullUrl, {
-            ...options,
-            ...(timeoutMs > 0 ? { signal: controller.signal } : {}),
-        })
+        const response = await fetch(fullUrl, fetchOptions)
         return response
     } finally {
         if (timeoutId !== null) clearTimeout(timeoutId)
