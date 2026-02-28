@@ -81,16 +81,16 @@ export function useVideoPanelsProjection({
           videoTaskRunning: panelVideoState?.phase === 'queued' || panelVideoState?.phase === 'processing',
           videoErrorMessage:
             panelVideoState?.phase === 'failed'
-              ? panelVideoState.lastError?.message || panel.videoErrorMessage || undefined
-              : panel.videoErrorMessage || undefined,
+              ? panelVideoState.lastError?.message || undefined
+              : undefined,
           videoModel: panel.videoModel || undefined,
           linkedToNextPanel: panel.linkedToNextPanel || false,
           lipSyncVideoUrl: panel.lipSyncVideoUrl || undefined,
           lipSyncTaskRunning: panelLipState?.phase === 'queued' || panelLipState?.phase === 'processing',
           lipSyncErrorMessage:
             panelLipState?.phase === 'failed'
-              ? panelLipState.lastError?.message || panel.lipSyncErrorMessage || undefined
-              : panel.lipSyncErrorMessage || undefined,
+              ? panelLipState.lastError?.message || undefined
+              : undefined,
         })
       })
     })
