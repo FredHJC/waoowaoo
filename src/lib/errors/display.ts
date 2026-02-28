@@ -13,9 +13,12 @@ export function resolveErrorDisplay(input?: {
 
   const code = resolveUnifiedErrorCode(input.code)
   if (code && code !== 'INTERNAL_ERROR') {
+    // 优先展示上游返回的原始信息（如 ARK/LLM 的具体错误），便于排查「请求参数不正确」等泛化提示的真实原因
+    const rawMessage = typeof input.message === 'string' ? input.message.trim() : ''
+    const fallbackMessage = getUserMessageByCode(code)
     return {
       code,
-      message: getUserMessageByCode(code),
+      message: rawMessage.length > 0 ? rawMessage : fallbackMessage,
     }
   }
 
@@ -26,9 +29,11 @@ export function resolveErrorDisplay(input?: {
     { context: 'api' },
   )
   if (normalized?.code) {
+    const rawMessage = typeof input.message === 'string' ? input.message.trim() : ''
+    const fallbackMessage = getUserMessageByCode(normalized.code)
     return {
       code: normalized.code,
-      message: getUserMessageByCode(normalized.code),
+      message: rawMessage.length > 0 ? rawMessage : fallbackMessage,
     }
   }
 

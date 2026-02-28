@@ -252,6 +252,7 @@ function validateArkVideoTaskRequest(request: ArkVideoTaskRequest) {
 
 /**
  * 带超时的 fetch 封装
+ * @param timeoutMs 超时毫秒数；≤0 表示不设超时（一直等待）
  */
 async function fetchWithTimeout(
     url: string,
@@ -259,7 +260,7 @@ async function fetchWithTimeout(
     timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<Response> {
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    const timeoutId = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null
 
     // 🔧 本地模式修复：相对路径需要补全完整 URL
     let fullUrl = url
@@ -272,11 +273,11 @@ async function fetchWithTimeout(
     try {
         const response = await fetch(fullUrl, {
             ...options,
-            signal: controller.signal
+            ...(timeoutMs > 0 ? { signal: controller.signal } : {}),
         })
         return response
     } finally {
-        clearTimeout(timeoutId)
+        if (timeoutId !== null) clearTimeout(timeoutId)
     }
 }
 
