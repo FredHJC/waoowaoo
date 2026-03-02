@@ -14,7 +14,7 @@ import {
 
 const ARK_API_KEY = process.env.ARK_API_KEY ?? ''
 const ARK_IMAGE_MODEL = 'doubao-seedream-4-5-251128'
-const ARK_VIDEO_MODEL = 'doubao-seedance-1-0-pro-fast-251015'
+const ARK_VIDEO_MODEL = 'doubao-seedance-1-5-pro-251215'
 
 /** Poll a video task until it reaches a terminal state */
 async function pollVideoTask(
@@ -122,12 +122,28 @@ describe.skipIf(!ARK_API_KEY)('e2e: ARK video pipeline (image → video)', () =>
       })
 
       expect(finalStatus.status).toBe('succeeded')
-      expect(finalStatus.content).toBeInstanceOf(Array)
-      expect(finalStatus.content!.length).toBeGreaterThanOrEqual(1)
 
-      const videoUrl = finalStatus.content![0].video_url.url
+      // Log full response to understand structure
+      console.log('[E2E] Final response:', JSON.stringify(finalStatus, null, 2).slice(0, 2000))
+
+      // Extract video URL: ARK may return content as an array or single object,
+      // and the video_url field may be { url: string } or just a string
+      const content = finalStatus.content
+      expect(content).toBeTruthy()
+
+      const contentItems = Array.isArray(content) ? content : [content]
+      expect(contentItems.length).toBeGreaterThanOrEqual(1)
+
+      const firstItem = contentItems[0] as Record<string, unknown>
+      const videoUrlField = firstItem.video_url as string | { url: string } | undefined
+      const videoUrl = typeof videoUrlField === 'string'
+        ? videoUrlField
+        : videoUrlField?.url
+
+      expect(videoUrl).toBeTruthy()
+      expect(typeof videoUrl).toBe('string')
       expect(videoUrl).toMatch(/^https?:\/\//)
-      console.log('[E2E] Video generated:', videoUrl.slice(0, 120), '...')
+      console.log('[E2E] Video generated:', videoUrl!.slice(0, 120), '...')
     },
     { timeout: 600_000 }, // 10 minutes total for the full pipeline
   )
