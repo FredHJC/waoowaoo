@@ -132,10 +132,21 @@ export async function executeRunRequest(args: RunRequestExecutorArgs): Promise<R
 
     const contentType = response.headers.get('content-type') || ''
     if (contentType.includes('text/event-stream') && response.body) {
+      let sseResult: RunResult | null = null
       await streamSSEBody({
         responseBody: response.body,
-        applyAndCapture: args.applyAndCapture,
+        applyAndCapture: (event) => {
+          args.applyAndCapture(event)
+          if (!sseResult) {
+            const terminal = toTerminalRunResult(event)
+            if (terminal) sseResult = terminal
+          }
+        },
       })
+      if (sseResult) {
+        args.finalResultRef.current = sseResult
+        return sseResult
+      }
     } else {
       const data = await response.json().catch(() => null)
       if (isAsyncTaskResponse(data)) {
