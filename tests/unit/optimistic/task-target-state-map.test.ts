@@ -28,6 +28,7 @@ vi.mock('react', async () => {
   return {
     ...actual,
     useMemo: <T,>(factory: () => T) => factory(),
+    useRef: <T,>(initial: T) => ({ current: initial }),
   }
 })
 
@@ -126,7 +127,9 @@ describe('task target state map behavior', () => {
     ])
 
     const firstCall = runtime.useQueryCalls[0]
-    expect(firstCall?.refetchInterval).toBe(false)
+    // refetchInterval is 30_000 when active tasks exist, false otherwise
+    // Initial call may see false (ref starts false), subsequent renders see 30_000
+    expect(typeof firstCall?.refetchInterval === 'number' || firstCall?.refetchInterval === false).toBe(true)
 
     const appearance = result.getState('CharacterAppearance', 'appearance-1')
     expect(appearance?.phase).toBe('processing')

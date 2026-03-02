@@ -64,7 +64,7 @@ vi.mock('bullmq', () => ({
   },
 }))
 
-vi.mock('@/lib/redis', () => ({ queueRedis: {} }))
+vi.mock('@/lib/redis', () => ({ queueRedis: {}, queueConnection: {} }))
 vi.mock('@/lib/workers/shared', () => ({
   reportTaskProgress: reportTaskProgressMock,
   withTaskLifecycle: withTaskLifecycleMock,

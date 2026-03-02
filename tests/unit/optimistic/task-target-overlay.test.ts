@@ -100,6 +100,9 @@ describe('task-target-overlay', () => {
     })
 
     const overlay = getOverlay(queryClient, projectId, key)
-    expect(overlay).toBeNull()
+    // Terminal events now create a short-lived completed overlay (5s TTL)
+    // instead of immediately clearing
+    expect(overlay?.phase).toBe('completed')
+    expect(overlay?.runningTaskId).toBe('task-3')
   })
 })
