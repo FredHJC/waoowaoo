@@ -209,7 +209,7 @@ export async function queryFalStatus(endpoint: string, requestId: string, apiKey
     if (status === 'FAILED') {
         return {
             status: 'FAILED',
-            completed: false,
+            completed: true,
             failed: true,
             error: data.error || '任务失败'
         }
@@ -283,7 +283,7 @@ export async function queryArkVideoStatus(taskId: string, apiKey: string): Promi
 
         return {
             status: 'failed',
-            completed: false,
+            completed: true,
             failed: true,
             error: errorMessage
         }
