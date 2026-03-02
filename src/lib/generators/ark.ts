@@ -219,10 +219,11 @@ export class ArkImageGenerator extends BaseImageGenerator {
             requestBody.image = base64Images
         }
 
-        // 调用 ARK API
+        // 调用 ARK API（图片生成高分辨率+长 prompt 常超过 60s，使用 180s 超时）
         const arkData = await arkImageGeneration(requestBody, {
             apiKey,
-            logPrefix: '[ARK Image]'
+            logPrefix: '[ARK Image]',
+            timeoutMs: 180 * 1000,
         })
 
         const imageUrl = arkData.data?.[0]?.url
@@ -467,9 +468,11 @@ export class ArkVideoGenerator extends BaseVideoGenerator {
         }
 
         try {
+            // 视频任务创建不设超时（跨境/排队/大图可能很久），避免 AbortError 导致大量重试失败
             const taskData = await arkCreateVideoTask(requestBody, {
                 apiKey,
-                logPrefix: '[ARK Video]'
+                logPrefix: '[ARK Video]',
+                timeoutMs: 0,
             })
 
             const taskId = taskData.id

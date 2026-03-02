@@ -41,6 +41,17 @@ export function loadTestEnv() {
     }
   }
 
+  // .env.test.local overrides .env.test (local secrets, never committed)
+  const envLocalPath = path.resolve(process.cwd(), '.env.test.local')
+  if (fs.existsSync(envLocalPath)) {
+    const content = fs.readFileSync(envLocalPath, 'utf8')
+    for (const line of content.split('\n')) {
+      const pair = parseEnvLine(line)
+      if (!pair) continue
+      mutableEnv[pair.key] = pair.value
+    }
+  }
+
   setIfMissing('NODE_ENV', 'test')
   setIfMissing('BILLING_MODE', 'OFF')
   setIfMissing('DATABASE_URL', 'mysql://root:root@127.0.0.1:3307/waoowaoo_test')

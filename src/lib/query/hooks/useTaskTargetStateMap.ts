@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { queryKeys } from '../keys'
 import type { TaskIntent } from '@/lib/task/intent'
@@ -285,11 +285,15 @@ export function useTaskTargetStateMap(
   )
   const enabled = (options.enabled ?? true) && !!projectId && normalizedTargets.length > 0
 
+  // Track whether any target is in an active state (queued/processing) to enable polling
+  const hasActiveTasksRef = useRef(false)
+
   const query = useQuery({
     queryKey: queryKeys.tasks.targetStates(projectId || '', serializedTargets),
     enabled,
     staleTime: options.staleTime ?? 15000,
-    refetchInterval: false,
+    // Poll every 30s when there are active tasks, to catch up if SSE misses events
+    refetchInterval: hasActiveTasksRef.current ? 30_000 : false,
     refetchOnMount: false,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -332,21 +336,6 @@ export function useTaskTargetStateMap(
         }
         continue
       }
-      if (runtime.phase !== 'queued' && runtime.phase !== 'processing') {
-        if (shouldTraceMergeTarget(target.targetType)) {
-          logMergeDecision({
-            projectId,
-            key,
-            decision: 'overlay_phase_ignored',
-            runtimePhase: runtime.phase,
-            runtimeTaskId: runtime.runningTaskId,
-            runtimeTaskType: runtime.runningTaskType,
-            currentPhase: map.get(key)?.phase || null,
-            whitelist: target.types || [],
-          })
-        }
-        continue
-      }
       // Skip overlay if the target has a types whitelist and the task type doesn't match
       if (!matchesTaskTypeWhitelist(target.types, runtime.runningTaskType)) {
         if (shouldTraceMergeTarget(target.targetType)) {
@@ -363,6 +352,21 @@ export function useTaskTargetStateMap(
         }
         continue
       }
+
+      // Terminal overlay: override DB cache directly (bridges the gap until DB query refreshes)
+      if (runtime.phase === 'completed' || runtime.phase === 'failed') {
+        const current = map.get(key)
+        map.set(key, {
+          ...(current || buildIdleState(target)),
+          ...runtime,
+          phase: runtime.phase,
+          targetType: target.targetType,
+          targetId: target.targetId,
+        })
+        continue
+      }
+
+      if (runtime.phase !== 'queued' && runtime.phase !== 'processing') continue
 
       const current = map.get(key)
       if (current) {
@@ -408,9 +412,14 @@ export function useTaskTargetStateMap(
   }, [normalizedTargets, overlayQuery.data, query.data])
 
   const mergedData = useMemo(() => {
-    return normalizedTargets.map((target) =>
+    const result = normalizedTargets.map((target) =>
       mergedByKey.get(stateKey(target.targetType, target.targetId)) || buildIdleState(target),
     )
+    // Update active tasks flag for polling (checked on next render cycle)
+    hasActiveTasksRef.current = result.some(
+      (s) => s.phase === 'queued' || s.phase === 'processing',
+    )
+    return result
   }, [mergedByKey, normalizedTargets])
 
   const byKey = useMemo(() => {

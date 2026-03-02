@@ -131,6 +131,7 @@ function resolveNextBackoffMs(job: Job<TaskJobData>, failedAttempt: number): num
 function shouldRetryInQueue(params: {
   job: Job<TaskJobData>
   normalizedError: NormalizedError
+  dbAttempt?: number
 }): {
   enabled: boolean
   failedAttempt: number
@@ -139,7 +140,10 @@ function shouldRetryInQueue(params: {
 } {
   const maxAttempts = resolveQueueAttempts(params.job)
   const failedAttempt = resolveAttemptsMade(params.job) + 1
-  const enabled = params.normalizedError.retryable && failedAttempt < maxAttempts
+  // Safety valve: also check DB attempt count to prevent infinite retry loops
+  // when BullMQ's attemptsMade counter diverges from actual execution count
+  const dbExceeded = typeof params.dbAttempt === 'number' && params.dbAttempt >= maxAttempts
+  const enabled = params.normalizedError.retryable && failedAttempt < maxAttempts && !dbExceeded
   return {
     enabled,
     failedAttempt,
@@ -186,12 +190,18 @@ async function resolveProjectNameForLogging(projectId: string): Promise<void> {
   }
 }
 
-export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Job<TaskJobData>) => Promise<Record<string, unknown> | void>) {
+export async function withTaskLifecycle(
+  job: Job<TaskJobData>,
+  handler: (job: Job<TaskJobData>) => Promise<Record<string, unknown> | void>,
+  options?: { timeoutMs?: number },
+) {
   const data = job.data
   const taskId = data.taskId
   const logger = buildWorkerLogger(data, job.queueName)
   const startedAt = Date.now()
   let billingInfo = (data.billingInfo || null) as TaskBillingInfo | null
+  // DB attempt count for retry safety valve (populated after tryMarkTaskProcessing)
+  let dbAttempt = 0
 
   // Register project name for per-project log file routing
   void resolveProjectNameForLogging(data.projectId)
@@ -213,6 +223,11 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
       },
     })
     const markedProcessing = await tryMarkTaskProcessing(taskId)
+    // Read DB attempt count (tryMarkTaskProcessing increments it)
+    if (markedProcessing) {
+      const taskRecord = await prisma.task.findUnique({ where: { id: taskId }, select: { attempt: true } })
+      dbAttempt = taskRecord?.attempt ?? 0
+    }
     if (!markedProcessing) {
       const rollbackResult = await rollbackTaskBillingForTask({
         taskId,
@@ -262,7 +277,20 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
       },
     })
 
-    const { result, textUsage } = await withTextUsageCollection(async () => await handler(job))
+    const timeoutMs = options?.timeoutMs
+    const handlerPromise = withTextUsageCollection(async () => await handler(job))
+    const { result, textUsage } = timeoutMs && timeoutMs > 0
+      ? await Promise.race([
+        handlerPromise,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(
+              `JOB_TIMEOUT: Task exceeded ${Math.round(timeoutMs / 60_000)}min timeout`
+            ))
+          }, timeoutMs)
+        }),
+      ])
+      : await handlerPromise
     if (billingInfo?.billable) {
       billingInfo = (await settleTaskBilling({
         id: taskId,
@@ -336,6 +364,7 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
     const retryDecision = shouldRetryInQueue({
       job,
       normalizedError,
+      dbAttempt,
     })
     const errorCauseChain = buildErrorCauseChain(error)
     const workerFailureLog = {

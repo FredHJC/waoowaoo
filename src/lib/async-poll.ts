@@ -290,7 +290,7 @@ async function pollFalTask(
     const result = await queryFalStatus(endpoint, requestId, apiKey)
 
     return {
-        status: result.completed ? (result.failed ? 'failed' : 'completed') : 'pending',
+        status: result.failed ? 'failed' : result.completed ? 'completed' : 'pending',
         resultUrl: result.resultUrl,
         imageUrl: result.resultUrl,
         videoUrl: result.resultUrl,

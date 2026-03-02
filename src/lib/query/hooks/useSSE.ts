@@ -19,6 +19,7 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
   const queryClient = useQueryClient()
   const sourceRef = useRef<EventSource | null>(null)
   const targetStatesInvalidateTimerRef = useRef<number | null>(null)
+  const hadErrorRef = useRef(false)
   const isGlobalAssetProject = projectId === 'global-asset-hub'
 
   const url = useMemo(() => {
@@ -162,6 +163,16 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
             ? payloadUi.hasOutputAtStart
             : null
 
+        const eventError = eventPayload?.error && typeof eventPayload.error === 'object' && !Array.isArray(eventPayload.error)
+          ? (eventPayload.error as Record<string, unknown>)
+          : null
+        const lastError = eventError
+          ? {
+              code: typeof eventError.code === 'string' ? eventError.code : 'UNKNOWN',
+              message: typeof eventError.message === 'string' ? eventError.message : 'Unknown error',
+            }
+          : null
+
         applyTaskLifecycleToOverlay(queryClient, {
           projectId,
           lifecycleType: normalizedLifecycleType,
@@ -175,6 +186,7 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
           stage: typeof eventPayload?.stage === 'string' ? eventPayload.stage : null,
           stageLabel: typeof eventPayload?.stageLabel === 'string' ? eventPayload.stageLabel : null,
           eventTs: typeof payload.ts === 'string' ? payload.ts : null,
+          lastError,
         })
 
         if (
@@ -206,11 +218,23 @@ export function useSSE({ projectId, episodeId, enabled = true, onEvent }: UseSSE
       source.addEventListener(type, handler)
       listeners.push({ type, handler })
     }
+    source.onopen = () => {
+      if (hadErrorRef.current) {
+        hadErrorRef.current = false
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(projectId) })
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.targetStatesAll(projectId), exact: false })
+        if (episodeId) {
+          invalidateEpisodeScoped(episodeId)
+        }
+      }
+    }
     source.onerror = (error) => {
+      hadErrorRef.current = true
       _ulogError('[useSSE] stream error', error)
     }
 
     return () => {
+      hadErrorRef.current = false
       if (targetStatesInvalidateTimerRef.current !== null) {
         window.clearTimeout(targetStatesInvalidateTimerRef.current)
         targetStatesInvalidateTimerRef.current = null

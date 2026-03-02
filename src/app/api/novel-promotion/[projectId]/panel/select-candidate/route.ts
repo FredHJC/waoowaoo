@@ -47,7 +47,7 @@ export const POST = apiHandler(async (
   if (isErrorResponse(authResult)) return authResult
 
   const body = await request.json()
-  const { panelId, selectedImageUrl, action = 'select' } = body
+  const { panelId, selectedImageUrl, candidateIndex, action = 'select' } = body
 
   if (!panelId) {
     throw new ApiError('INVALID_PARAMS')
@@ -82,15 +82,41 @@ export const POST = apiHandler(async (
 
   // 验证选择的图片是否在候选列表中
   const candidateImages = parseUnknownArray(panel.candidateImages)
+  // Filter out PENDING entries to match frontend behavior
+  const validCandidates = candidateImages
+    .filter((c): c is string => typeof c === 'string' && !c.startsWith('PENDING:'))
 
-  const selectedCosKey = await resolveStorageKeyFromMediaValue(selectedImageUrl)
-  const candidateKeys = (await Promise.all(candidateImages.map((candidate: unknown) => resolveStorageKeyFromMediaValue(candidate))))
-    .filter((k): k is string => !!k)
-  const isValidCandidate = !!selectedCosKey && candidateKeys.includes(selectedCosKey)
+  let finalImageKey: string | null = null
 
-  if (!isValidCandidate) {
+  // Plan A: Use candidateIndex for direct lookup (preferred, avoids URL round-trip issues)
+  if (typeof candidateIndex === 'number' && candidateIndex >= 0 && candidateIndex < validCandidates.length) {
+    const rawKey = validCandidates[candidateIndex]
+    // The raw value from DB is a COS key — resolve it to ensure it's a valid storage key
+    const resolvedKey = await resolveStorageKeyFromMediaValue(rawKey)
+    if (resolvedKey) {
+      finalImageKey = resolvedKey
+      _ulogInfo(
+        `[select-candidate] ✅ Index-based selection: candidateIndex=${candidateIndex}, key=${finalImageKey}`,
+      )
+    }
+  }
+
+  // Plan B: Fall back to URL-based matching for backward compatibility
+  if (!finalImageKey) {
+    const selectedCosKey = await resolveStorageKeyFromMediaValue(selectedImageUrl)
+    const candidateKeys = (await Promise.all(validCandidates.map((candidate) => resolveStorageKeyFromMediaValue(candidate))))
+      .filter((k): k is string => !!k)
+    if (selectedCosKey && candidateKeys.includes(selectedCosKey)) {
+      finalImageKey = selectedCosKey
+      _ulogInfo(
+        `[select-candidate] ✅ URL-based fallback selection: key=${finalImageKey}`,
+      )
+    }
+  }
+
+  if (!finalImageKey) {
     _ulogInfo(
-      `[select-candidate] 选择失败: selectedCosKey=${selectedCosKey}, candidateKeys=${JSON.stringify(candidateKeys)}, candidateImages=${JSON.stringify(candidateImages)}`,
+      `[select-candidate] 选择失败: candidateIndex=${candidateIndex}, validCandidates=${JSON.stringify(validCandidates)}, candidateImages=${JSON.stringify(candidateImages)}`,
     )
     throw new ApiError('INVALID_PARAMS')
   }
@@ -105,7 +131,6 @@ export const POST = apiHandler(async (
   }
 
   // 选择候选图时优先复用已存在的 COS key，避免重复下载上传（也避免 /m/* 相对URL被 Node fetch 解析失败）
-  let finalImageKey = selectedCosKey as string
   const isReusableKey = !finalImageKey.startsWith('http://') && !finalImageKey.startsWith('https://') && !finalImageKey.startsWith('/')
 
   if (!isReusableKey) {

@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq'
 import { prisma } from '@/lib/prisma'
-import { queueRedis } from '@/lib/redis'
+import { queueConnection } from '@/lib/redis'
 import { QUEUE_NAME } from '@/lib/task/queues'
 import { TASK_TYPE, type TaskJobData } from '@/lib/task/types'
 import { reportTaskProgress, withTaskLifecycle } from './shared'
@@ -12,10 +12,36 @@ import {
   toSignedUrlIfCos,
   uploadVideoSourceToCos,
 } from './utils'
+import sharp from 'sharp'
+import { logInfo as _ulogInfo } from '@/lib/logging/core'
 import { normalizeToBase64ForGeneration } from '@/lib/media/outbound-image'
 import { resolveBuiltinCapabilitiesByModelKey } from '@/lib/model-capabilities/lookup'
 import { parseModelKeyStrict } from '@/lib/model-config-contract'
 import { getProviderConfig } from '@/lib/api-config'
+
+const VIDEO_INPUT_MAX_DIMENSION = 2048
+
+async function downsizeBase64ForVideo(dataUrl: string): Promise<string> {
+  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+  if (!match) return dataUrl
+
+  const buffer = Buffer.from(match[2], 'base64')
+  const meta = await sharp(buffer).metadata()
+  const w = meta.width || 0
+  const h = meta.height || 0
+
+  if (w <= VIDEO_INPUT_MAX_DIMENSION && h <= VIDEO_INPUT_MAX_DIMENSION) {
+    return dataUrl
+  }
+
+  const resized = await sharp(buffer)
+    .resize({ width: VIDEO_INPUT_MAX_DIMENSION, height: VIDEO_INPUT_MAX_DIMENSION, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 90, mozjpeg: true })
+    .toBuffer()
+
+  _ulogInfo(`[Video] 图片缩放: ${w}x${h} → ${VIDEO_INPUT_MAX_DIMENSION}px, ${(buffer.length / 1024).toFixed(0)}KB → ${(resized.length / 1024).toFixed(0)}KB`)
+  return `data:image/jpeg;base64,${resized.toString('base64')}`
+}
 
 type AnyObj = Record<string, unknown>
 type VideoOptionValue = string | number | boolean
@@ -98,7 +124,7 @@ async function generateVideoForPanel(
   if (!sourceImageUrl) {
     throw new Error(`Panel ${panel.id} image url invalid`)
   }
-  const sourceImageBase64 = await normalizeToBase64ForGeneration(sourceImageUrl)
+  const sourceImageBase64 = await downsizeBase64ForVideo(await normalizeToBase64ForGeneration(sourceImageUrl))
 
   let lastFrameImageBase64: string | undefined
   const generationMode: VideoGenerationMode = firstLastFramePayload ? 'firstlastframe' : 'normal'
@@ -128,7 +154,7 @@ async function generateVideoForPanel(
       if (lastPanel?.imageUrl) {
         const lastFrameUrl = toSignedUrlIfCos(lastPanel.imageUrl, 3600)
         if (lastFrameUrl) {
-          lastFrameImageBase64 = await normalizeToBase64ForGeneration(lastFrameUrl)
+          lastFrameImageBase64 = await downsizeBase64ForVideo(await normalizeToBase64ForGeneration(lastFrameUrl))
         }
       }
     }
@@ -274,6 +300,10 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   }
 }
 
+const VIDEO_JOB_TIMEOUT_MS = Number.parseInt(
+  process.env.VIDEO_JOB_TIMEOUT_MS || String(10 * 60 * 1000), 10,
+)
+
 async function processVideoTask(job: Job<TaskJobData>) {
   await reportTaskProgress(job, 5, { stage: 'received' })
 
@@ -290,9 +320,11 @@ async function processVideoTask(job: Job<TaskJobData>) {
 export function createVideoWorker() {
   return new Worker<TaskJobData>(
     QUEUE_NAME.VIDEO,
-    async (job) => await withTaskLifecycle(job, processVideoTask),
+    async (job) => await withTaskLifecycle(job, processVideoTask, {
+      timeoutMs: VIDEO_JOB_TIMEOUT_MS,
+    }),
     {
-      connection: queueRedis,
+      connection: queueConnection,
       concurrency: Number.parseInt(process.env.QUEUE_CONCURRENCY_VIDEO || '4', 10) || 4,
     },
   )
