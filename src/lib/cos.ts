@@ -131,13 +131,28 @@ let BUCKET = ''
 let REGION = ''
 
 if (!isLocalStorage) {
+  const requiredEnvVars = {
+    COS_SECRET_ID: process.env.COS_SECRET_ID,
+    COS_SECRET_KEY: process.env.COS_SECRET_KEY,
+    COS_BUCKET: process.env.COS_BUCKET,
+    COS_REGION: process.env.COS_REGION,
+  }
+  const missing = Object.entries(requiredEnvVars)
+    .filter(([, v]) => !v)
+    .map(([k]) => k)
+  if (missing.length > 0) {
+    throw new Error(
+      `[COS] STORAGE_TYPE=cos but missing required env vars: ${missing.join(', ')}. ` +
+      `Please set them in your .env file or environment.`
+    )
+  }
   cos = new COS({
-    SecretId: process.env.COS_SECRET_ID!,
-    SecretKey: process.env.COS_SECRET_KEY!,
+    SecretId: requiredEnvVars.COS_SECRET_ID!,
+    SecretKey: requiredEnvVars.COS_SECRET_KEY!,
     Timeout: COS_TIMEOUT_MS,
   })
-  BUCKET = process.env.COS_BUCKET!
-  REGION = process.env.COS_REGION!
+  BUCKET = requiredEnvVars.COS_BUCKET!
+  REGION = requiredEnvVars.COS_REGION!
 }
 
 /**
