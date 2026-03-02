@@ -135,6 +135,14 @@ export default function StoryboardGroup({
     [clearPanelTaskError, onRegeneratePanelImage],
   )
 
+  const handleConfirmPanelCandidate = useCallback(
+    async (panelId: string, imageUrl: string) => {
+      clearPanelTaskError(panelId)
+      await onConfirmPanelCandidate(panelId, imageUrl)
+    },
+    [clearPanelTaskError, onConfirmPanelCandidate],
+  )
+
   return (
     <div className={`glass-surface-elevated p-6 relative ${failedError ? 'border-2 border-[var(--glass-stroke-danger)] bg-[var(--glass-danger-ring)]' : ''}`}>
       {failedError && (
@@ -226,7 +234,7 @@ export default function StoryboardGroup({
         onOpenEditModal={onOpenEditModal}
         onOpenAIDataModal={onOpenAIDataModal}
         onSelectPanelCandidateIndex={onSelectPanelCandidateIndex}
-        onConfirmPanelCandidate={onConfirmPanelCandidate}
+        onConfirmPanelCandidate={handleConfirmPanelCandidate}
         onCancelPanelCandidate={onCancelPanelCandidate}
         onClearPanelTaskError={clearPanelTaskError}
         onPreviewImage={onPreviewImage}
