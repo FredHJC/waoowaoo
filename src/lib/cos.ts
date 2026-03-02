@@ -130,7 +130,11 @@ let cos: COS | null = null
 let BUCKET = ''
 let REGION = ''
 
-if (!isLocalStorage) {
+let cosInitialized = false
+
+function ensureCosInitialized() {
+  if (cosInitialized || isLocalStorage) return
+  cosInitialized = true
   const requiredEnvVars = {
     COS_SECRET_ID: process.env.COS_SECRET_ID,
     COS_SECRET_KEY: process.env.COS_SECRET_KEY,
@@ -162,6 +166,7 @@ export function getCOSClient() {
   if (isLocalStorage) {
     throw new Error('本地存储模式下不支持获取COS客户端')
   }
+  ensureCosInitialized()
   return cos!
 }
 
@@ -189,6 +194,7 @@ export async function uploadToCOS(buffer: Buffer, key: string, maxRetries: numbe
   }
 
   // ==================== COS云存储模式 ====================
+  ensureCosInitialized()
   let lastError: unknown = null
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -622,6 +628,7 @@ export function getSignedUrl(key: string, _expires: number = SIGNED_URL_EXPIRES_
   }
 
   // ==================== COS云存储模式 ====================
+  ensureCosInitialized()
   // 统一固定为24小时，忽略外部传入的 expires 值
   const url = cos!.getObjectUrl({
     Bucket: BUCKET,

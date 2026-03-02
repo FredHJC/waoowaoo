@@ -178,30 +178,23 @@ export function applyTaskLifecycleToOverlay(
     return
   }
 
-  if (params.lifecycleType === TASK_EVENT_TYPE.COMPLETED) {
-    upsertTaskTargetOverlay(queryClient, {
-      projectId: params.projectId,
-      targetType: params.targetType,
-      targetId: params.targetId,
-      phase: 'completed',
-      runningTaskId: params.taskId,
-      runningTaskType: params.taskType,
-      intent: params.intent,
-      hasOutputAtStart: params.hasOutputAtStart,
-      progress: null,
-      stage: null,
-      stageLabel: null,
-      updatedAt: params.eventTs,
-    })
-    return
-  }
+  if (params.lifecycleType === TASK_EVENT_TYPE.COMPLETED || params.lifecycleType === TASK_EVENT_TYPE.FAILED) {
+    // For terminal events, only apply if the taskId matches the current overlay
+    // to avoid a stale completed/failed event overwriting a newer task's overlay
+    const key = toOverlayKey(params.targetType, params.targetId)
+    const currentMap = queryClient.getQueryData<TaskTargetOverlayMap>(
+      queryKeys.tasks.targetStateOverlay(params.projectId),
+    )
+    const existing = currentMap?.[key]
+    if (existing?.runningTaskId && params.taskId && existing.runningTaskId !== params.taskId) {
+      return
+    }
 
-  if (params.lifecycleType === TASK_EVENT_TYPE.FAILED) {
     upsertTaskTargetOverlay(queryClient, {
       projectId: params.projectId,
       targetType: params.targetType,
       targetId: params.targetId,
-      phase: 'failed',
+      phase: params.lifecycleType === TASK_EVENT_TYPE.COMPLETED ? 'completed' : 'failed',
       runningTaskId: params.taskId,
       runningTaskType: params.taskType,
       intent: params.intent,
@@ -210,7 +203,7 @@ export function applyTaskLifecycleToOverlay(
       stage: null,
       stageLabel: null,
       updatedAt: params.eventTs,
-      lastError: params.lastError ?? null,
+      ...(params.lifecycleType === TASK_EVENT_TYPE.FAILED ? { lastError: params.lastError ?? null } : {}),
     })
   }
 }
