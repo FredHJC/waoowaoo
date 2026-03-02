@@ -1,13 +1,13 @@
-import { Agent } from 'undici'
+import { Agent, fetch as undiciFetch } from 'undici'
 import { logInfo as _ulogInfo, logError as _ulogError } from '@/lib/logging/core'
 /**
  * 火山引擎 API 统一调用工具
- * 
+ *
  * 解决问题：Vercel（海外）→ 火山引擎（北京）跨境网络超时
- * 
+ *
  * 功能：
  * - 60秒超时配置（Vercel Pro 函数限制）
- * - 自动重试机制（最多3次，指数退避）
+ * - 自动重试机制（最多3次，指数退避 + jitter）
  * - 详细的错误日志
  */
 
@@ -15,6 +15,7 @@ const ARK_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 
 // 超时配置
 const DEFAULT_TIMEOUT_MS = 60 * 1000  // 60秒
+const NO_TIMEOUT_FALLBACK_MS = 10 * 60 * 1000  // 10分钟：作为"无超时"模式的安全上限
 const MAX_RETRIES = 3
 const RETRY_DELAY_BASE_MS = 2000  // 2秒起始延迟
 
@@ -260,15 +261,20 @@ const NO_TIMEOUT_AGENT = new Agent({
 
 /**
  * 带超时的 fetch 封装
- * @param timeoutMs 超时毫秒数；≤0 表示不设超时（一直等待），并关闭 undici 的 headers/body 超时以免 HeadersTimeoutError
+ * @param timeoutMs 超时毫秒数；≤0 表示不设超时（使用 NO_TIMEOUT_FALLBACK_MS 作为安全上限）
+ *
+ * 始终使用 undici 自带的 fetch + NO_TIMEOUT_AGENT 作为 dispatcher，
+ * 确保 headersTimeout / bodyTimeout / connectTimeout 全部关闭，
+ * 避免 Node 全局 fetch 与 npm undici 版本不匹配导致 dispatcher 选项被忽略。
  */
 async function fetchWithTimeout(
     url: string,
     options: RequestInit,
     timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<Response> {
+    const effectiveTimeout = timeoutMs > 0 ? timeoutMs : NO_TIMEOUT_FALLBACK_MS
     const controller = new AbortController()
-    const timeoutId = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null
+    const timeoutId = setTimeout(() => controller.abort(), effectiveTimeout)
 
     // 🔧 本地模式修复：相对路径需要补全完整 URL
     let fullUrl = url
@@ -278,16 +284,17 @@ async function fetchWithTimeout(
         fullUrl = `${baseUrl}${url}`
     }
 
-    const fetchOptions: RequestInit & { dispatcher?: Agent } = {
-        ...options,
-        ...(timeoutMs > 0 ? { signal: controller.signal } : { dispatcher: NO_TIMEOUT_AGENT }),
-    }
-
     try {
-        const response = await fetch(fullUrl, fetchOptions)
-        return response
+        // 使用 undici 自带 fetch 以确保 dispatcher 选项生效
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const response = await undiciFetch(fullUrl, {
+            ...(options as any),
+            signal: controller.signal,
+            dispatcher: NO_TIMEOUT_AGENT,
+        } as any)
+        return response as unknown as Response
     } finally {
-        if (timeoutId !== null) clearTimeout(timeoutId)
+        clearTimeout(timeoutId)
     }
 }
 
@@ -351,10 +358,12 @@ async function fetchWithRetry(
             _ulogError(`${logPrefix} 第 ${attempt}/${maxRetries} 次尝试失败:`, JSON.stringify(errorDetails, null, 2))
         }
 
-        // 如果不是最后一次尝试，等待后重试
+        // 如果不是最后一次尝试，等待后重试（指数退避 + 随机 jitter 防止 thundering herd）
         if (attempt < maxRetries) {
-            const delayMs = RETRY_DELAY_BASE_MS * Math.pow(2, attempt - 1)  // 指数退避：2s, 4s, 8s
-            _ulogInfo(`${logPrefix} 等待 ${delayMs / 1000} 秒后重试...`)
+            const baseDelay = RETRY_DELAY_BASE_MS * Math.pow(2, attempt - 1)  // 2s, 4s, 8s
+            const jitter = Math.floor(Math.random() * baseDelay * 0.5)       // 0 ~ 50% 随机抖动
+            const delayMs = baseDelay + jitter
+            _ulogInfo(`${logPrefix} 等待 ${(delayMs / 1000).toFixed(1)} 秒后重试...`)
             await new Promise(resolve => setTimeout(resolve, delayMs))
         }
     }

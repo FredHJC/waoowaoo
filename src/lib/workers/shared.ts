@@ -131,6 +131,7 @@ function resolveNextBackoffMs(job: Job<TaskJobData>, failedAttempt: number): num
 function shouldRetryInQueue(params: {
   job: Job<TaskJobData>
   normalizedError: NormalizedError
+  dbAttempt?: number
 }): {
   enabled: boolean
   failedAttempt: number
@@ -139,7 +140,10 @@ function shouldRetryInQueue(params: {
 } {
   const maxAttempts = resolveQueueAttempts(params.job)
   const failedAttempt = resolveAttemptsMade(params.job) + 1
-  const enabled = params.normalizedError.retryable && failedAttempt < maxAttempts
+  // Safety valve: also check DB attempt count to prevent infinite retry loops
+  // when BullMQ's attemptsMade counter diverges from actual execution count
+  const dbExceeded = typeof params.dbAttempt === 'number' && params.dbAttempt >= maxAttempts
+  const enabled = params.normalizedError.retryable && failedAttempt < maxAttempts && !dbExceeded
   return {
     enabled,
     failedAttempt,
@@ -192,6 +196,8 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
   const logger = buildWorkerLogger(data, job.queueName)
   const startedAt = Date.now()
   let billingInfo = (data.billingInfo || null) as TaskBillingInfo | null
+  // DB attempt count for retry safety valve (populated after tryMarkTaskProcessing)
+  let dbAttempt = 0
 
   // Register project name for per-project log file routing
   void resolveProjectNameForLogging(data.projectId)
@@ -213,6 +219,11 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
       },
     })
     const markedProcessing = await tryMarkTaskProcessing(taskId)
+    // Read DB attempt count (tryMarkTaskProcessing increments it)
+    if (markedProcessing) {
+      const taskRecord = await prisma.task.findUnique({ where: { id: taskId }, select: { attempt: true } })
+      dbAttempt = taskRecord?.attempt ?? 0
+    }
     if (!markedProcessing) {
       const rollbackResult = await rollbackTaskBillingForTask({
         taskId,
@@ -336,6 +347,7 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
     const retryDecision = shouldRetryInQueue({
       job,
       normalizedError,
+      dbAttempt,
     })
     const errorCauseChain = buildErrorCauseChain(error)
     const workerFailureLog = {
