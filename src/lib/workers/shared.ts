@@ -190,7 +190,11 @@ async function resolveProjectNameForLogging(projectId: string): Promise<void> {
   }
 }
 
-export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Job<TaskJobData>) => Promise<Record<string, unknown> | void>) {
+export async function withTaskLifecycle(
+  job: Job<TaskJobData>,
+  handler: (job: Job<TaskJobData>) => Promise<Record<string, unknown> | void>,
+  options?: { timeoutMs?: number },
+) {
   const data = job.data
   const taskId = data.taskId
   const logger = buildWorkerLogger(data, job.queueName)
@@ -273,7 +277,20 @@ export async function withTaskLifecycle(job: Job<TaskJobData>, handler: (job: Jo
       },
     })
 
-    const { result, textUsage } = await withTextUsageCollection(async () => await handler(job))
+    const timeoutMs = options?.timeoutMs
+    const handlerPromise = withTextUsageCollection(async () => await handler(job))
+    const { result, textUsage } = timeoutMs && timeoutMs > 0
+      ? await Promise.race([
+        handlerPromise,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(
+              `JOB_TIMEOUT: Task exceeded ${Math.round(timeoutMs / 60_000)}min timeout`
+            ))
+          }, timeoutMs)
+        }),
+      ])
+      : await handlerPromise
     if (billingInfo?.billable) {
       billingInfo = (await settleTaskBilling({
         id: taskId,
