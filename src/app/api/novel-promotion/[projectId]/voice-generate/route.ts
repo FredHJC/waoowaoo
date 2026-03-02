@@ -24,11 +24,13 @@ type CharacterRow = {
 
 function parseSpeakerVoices(raw: string | null | undefined) {
   if (!raw) return {} as Record<string, { audioUrl?: string | null }>
-  const parsed = JSON.parse(raw)
-  if (!parsed || typeof parsed !== 'object') {
-    throw new ApiError('INVALID_PARAMS')
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return {}
+    return parsed as Record<string, { audioUrl?: string | null }>
+  } catch {
+    return {}
   }
-  return parsed as Record<string, { audioUrl?: string | null }>
 }
 
 function matchCharacterBySpeaker(speaker: string, characters: CharacterRow[]) {
