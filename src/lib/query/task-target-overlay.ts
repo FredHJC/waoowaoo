@@ -4,8 +4,9 @@ import { TASK_EVENT_TYPE } from '@/lib/task/types'
 import type { TaskIntent } from '@/lib/task/intent'
 
 export const TASK_TARGET_OVERLAY_TTL_MS = 30_000
+export const TASK_TARGET_OVERLAY_TERMINAL_TTL_MS = 5_000
 
-export type TaskTargetOverlayPhase = 'queued' | 'processing'
+export type TaskTargetOverlayPhase = 'queued' | 'processing' | 'completed' | 'failed'
 
 export type TaskTargetOverlayState = {
   targetType: string
@@ -19,7 +20,7 @@ export type TaskTargetOverlayState = {
   stage: string | null
   stageLabel: string | null
   updatedAt: string | null
-  lastError: null
+  lastError: { code: string; message: string } | null
   expiresAt: number
 }
 
@@ -64,10 +65,14 @@ export function upsertTaskTargetOverlay(
     stage?: string | null
     stageLabel?: string | null
     updatedAt?: string | null
+    lastError?: { code: string; message: string } | null
   },
 ) {
   const now = Date.now()
   const key = toOverlayKey(params.targetType, params.targetId)
+  const phase = params.phase || 'queued'
+  const isTerminal = phase === 'completed' || phase === 'failed'
+  const ttl = isTerminal ? TASK_TARGET_OVERLAY_TERMINAL_TTL_MS : TASK_TARGET_OVERLAY_TTL_MS
   queryClient.setQueryData<TaskTargetOverlayMap>(
     queryKeys.tasks.targetStateOverlay(params.projectId),
     (prev) => {
@@ -81,7 +86,7 @@ export function upsertTaskTargetOverlay(
       next[key] = {
         targetType: params.targetType,
         targetId: params.targetId,
-        phase: params.phase || 'queued',
+        phase,
         runningTaskId,
         runningTaskType,
         intent: params.intent || 'process',
@@ -90,8 +95,8 @@ export function upsertTaskTargetOverlay(
         stage: params.stage ?? null,
         stageLabel: params.stageLabel ?? null,
         updatedAt: params.updatedAt || new Date(now).toISOString(),
-        lastError: null,
-        expiresAt: now + TASK_TARGET_OVERLAY_TTL_MS,
+        lastError: params.lastError ?? null,
+        expiresAt: now + ttl,
       }
       return next
     },
@@ -133,6 +138,7 @@ export function applyTaskLifecycleToOverlay(
     stage: string | null
     stageLabel: string | null
     eventTs: string | null
+    lastError?: { code: string; message: string } | null
   },
 ) {
   if (!params.targetType || !params.targetId) return
@@ -172,25 +178,39 @@ export function applyTaskLifecycleToOverlay(
     return
   }
 
-  if (
-    params.lifecycleType === TASK_EVENT_TYPE.COMPLETED ||
-    params.lifecycleType === TASK_EVENT_TYPE.FAILED
-  ) {
-    const key = toOverlayKey(params.targetType, params.targetId)
-    queryClient.setQueryData<TaskTargetOverlayMap>(
-      queryKeys.tasks.targetStateOverlay(params.projectId),
-      (prev) => {
-        if (!prev || !prev[key]) return prev || {}
-        const current = prev[key]
-        const incomingTaskId = normalizeOptionalString(params.taskId)
-        const currentTaskId = normalizeOptionalString(current.runningTaskId)
-        if (incomingTaskId && currentTaskId && incomingTaskId !== currentTaskId) {
-          return prev
-        }
-        const next: TaskTargetOverlayMap = { ...prev }
-        delete next[key]
-        return next
-      },
-    )
+  if (params.lifecycleType === TASK_EVENT_TYPE.COMPLETED) {
+    upsertTaskTargetOverlay(queryClient, {
+      projectId: params.projectId,
+      targetType: params.targetType,
+      targetId: params.targetId,
+      phase: 'completed',
+      runningTaskId: params.taskId,
+      runningTaskType: params.taskType,
+      intent: params.intent,
+      hasOutputAtStart: params.hasOutputAtStart,
+      progress: null,
+      stage: null,
+      stageLabel: null,
+      updatedAt: params.eventTs,
+    })
+    return
+  }
+
+  if (params.lifecycleType === TASK_EVENT_TYPE.FAILED) {
+    upsertTaskTargetOverlay(queryClient, {
+      projectId: params.projectId,
+      targetType: params.targetType,
+      targetId: params.targetId,
+      phase: 'failed',
+      runningTaskId: params.taskId,
+      runningTaskType: params.taskType,
+      intent: params.intent,
+      hasOutputAtStart: params.hasOutputAtStart,
+      progress: null,
+      stage: null,
+      stageLabel: null,
+      updatedAt: params.eventTs,
+      lastError: params.lastError ?? null,
+    })
   }
 }
