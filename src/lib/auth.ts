@@ -3,11 +3,11 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { logAuthAction } from './logging/semantic'
 import { prisma } from './prisma'
-import type { AuthOptions } from 'next-auth'
 import type { JWT } from 'next-auth/jwt'
 import type { Session, User } from 'next-auth'
 
-export const authOptions: AuthOptions = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- next-auth v4 AuthOptions type is not accessible with moduleResolution:bundler
+export const authOptions: any = {
   adapter: PrismaAdapter(prisma),
   // 🔥 允许从任意 Host 访问（解决局域网访问问题）
   trustHost: true,
