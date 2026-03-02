@@ -300,6 +300,10 @@ async function handleLipSyncTask(job: Job<TaskJobData>) {
   }
 }
 
+const VIDEO_JOB_TIMEOUT_MS = Number.parseInt(
+  process.env.VIDEO_JOB_TIMEOUT_MS || String(10 * 60 * 1000), 10,
+)
+
 async function processVideoTask(job: Job<TaskJobData>) {
   await reportTaskProgress(job, 5, { stage: 'received' })
 
@@ -316,7 +320,9 @@ async function processVideoTask(job: Job<TaskJobData>) {
 export function createVideoWorker() {
   return new Worker<TaskJobData>(
     QUEUE_NAME.VIDEO,
-    async (job) => await withTaskLifecycle(job, processVideoTask),
+    async (job) => await withTaskLifecycle(job, processVideoTask, {
+      timeoutMs: VIDEO_JOB_TIMEOUT_MS,
+    }),
     {
       connection: queueConnection,
       concurrency: Number.parseInt(process.env.QUEUE_CONCURRENCY_VIDEO || '4', 10) || 4,
