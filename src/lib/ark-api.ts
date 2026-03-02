@@ -94,11 +94,10 @@ interface ArkVideoTaskRequest {
 interface ArkVideoTaskResponse {
     id: string
     model: string
-    status: 'processing' | 'succeeded' | 'failed'
-    content?: Array<{
-        type: 'video_url'
-        video_url: { url: string }
-    }>
+    status: 'queued' | 'running' | 'processing' | 'succeeded' | 'failed'
+    content?: {
+        video_url: string
+    }
     error?: {
         code: string
         message: string
