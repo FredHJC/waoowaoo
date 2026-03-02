@@ -32,10 +32,15 @@ export const GET = apiHandler(async (
         return NextResponse.json({ projectData: null }, { status: 200 })
     }
 
+    let projectData: unknown = null
+    try {
+        projectData = JSON.parse(editorProject.projectData)
+    } catch { /* corrupted data returns null */ }
+
     return NextResponse.json({
         id: editorProject.id,
         episodeId: editorProject.episodeId,
-        projectData: JSON.parse(editorProject.projectData),
+        projectData,
         renderStatus: editorProject.renderStatus,
         outputUrl: editorProject.outputUrl,
         updatedAt: editorProject.updatedAt
