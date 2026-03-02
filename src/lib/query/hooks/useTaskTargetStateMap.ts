@@ -332,21 +332,6 @@ export function useTaskTargetStateMap(
         }
         continue
       }
-      if (runtime.phase !== 'queued' && runtime.phase !== 'processing') {
-        if (shouldTraceMergeTarget(target.targetType)) {
-          logMergeDecision({
-            projectId,
-            key,
-            decision: 'overlay_phase_ignored',
-            runtimePhase: runtime.phase,
-            runtimeTaskId: runtime.runningTaskId,
-            runtimeTaskType: runtime.runningTaskType,
-            currentPhase: map.get(key)?.phase || null,
-            whitelist: target.types || [],
-          })
-        }
-        continue
-      }
       // Skip overlay if the target has a types whitelist and the task type doesn't match
       if (!matchesTaskTypeWhitelist(target.types, runtime.runningTaskType)) {
         if (shouldTraceMergeTarget(target.targetType)) {
@@ -363,6 +348,21 @@ export function useTaskTargetStateMap(
         }
         continue
       }
+
+      // Terminal overlay: override DB cache directly (bridges the gap until DB query refreshes)
+      if (runtime.phase === 'completed' || runtime.phase === 'failed') {
+        const current = map.get(key)
+        map.set(key, {
+          ...(current || buildIdleState(target)),
+          ...runtime,
+          phase: runtime.phase,
+          targetType: target.targetType,
+          targetId: target.targetId,
+        })
+        continue
+      }
+
+      if (runtime.phase !== 'queued' && runtime.phase !== 'processing') continue
 
       const current = map.get(key)
       if (current) {
