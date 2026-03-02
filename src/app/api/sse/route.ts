@@ -191,6 +191,12 @@ export const GET = apiHandler(async (request: NextRequest) => {
         }
       })
 
+      // If client disconnected while we were subscribing, clean up immediately
+      if (closed) {
+        try { await unsubscribe() } catch {}
+        return
+      }
+
       timer = setInterval(() => safeEnqueue(formatHeartbeat()), 15_000)
     },
     cancel() {
