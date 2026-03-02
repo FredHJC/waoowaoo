@@ -64,9 +64,13 @@ export function usePanelCandidates({
       _ulogInfo('[confirmPanelCandidate] panelId:', panelId)
       _ulogInfo('[confirmPanelCandidate] imageUrl:', imageUrl.substring(0, 100))
 
+      const candidateState = candidateSystem.getCandidateState(panelId)
+      const candidateIndex = candidateState?.selectedIndex
+
       const data = await selectCandidateMutation.mutateAsync({
         panelId,
         selectedImageUrl: imageUrl,
+        candidateIndex: typeof candidateIndex === 'number' && candidateIndex >= 0 ? candidateIndex : undefined,
         action: 'select',
       })
       const result = (data || {}) as SelectPanelCandidateResult

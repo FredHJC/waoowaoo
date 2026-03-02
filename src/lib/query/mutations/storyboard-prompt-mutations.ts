@@ -139,6 +139,7 @@ export function useSelectProjectPanelCandidate(projectId: string) {
             panelId: string
             action: 'select' | 'cancel'
             selectedImageUrl?: string
+            candidateIndex?: number
         }) =>
             await requestJsonWithError(
                 `/api/novel-promotion/${projectId}/panel/select-candidate`,
